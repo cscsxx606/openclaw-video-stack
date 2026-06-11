@@ -1,199 +1,101 @@
-# 📖 详细使用指南
+# 📖 使用指南
 
-## 🎬 三种使用方式
-
-### 方式 1：自然语言（最简单）
-
-在 OpenClaw 对话中直接说：
-
-```
-帮我做一个 30 秒短视频，主题是"小米 SU7 Ultra 纽北跑进 7 分"
-```
-
-OpenClaw 会自动：
-1. 生成 150 字口播稿
-2. 生成 5 镜头分镜表
-3. 生成 Seedance 提示词
-4. 调用 Seedance API 生成视频
-5. FFmpeg 拼接 + 字幕烧录
-6. 配音 + BGM + 最终合成
-
-输出：`~/.openclaw/workspace/output/videos/<项目名>/su7-final.mp4`
-
-### 方式 2：指定输入文件
-
-把已有文章转视频：
-
-```
-把 ~/.openclaw/workspace/output/articles/claude-opus-4-7-解读.md 做成 30 秒短视频
-```
-
-### 方式 3：使用脚本
+## 快速开始（一句话生成视频）
 
 ```bash
-# 一键生成
-./scripts/one-click-generate.sh "小米 SU7 Ultra 纽北跑进 7 分"
+# 1. 生成视频（Seedance 2.0）
+python3 skills/Seedance2-skill/scripts/seedance.py create \
+  --prompt "赛车在纽北赛道飞驰" --ratio 9:16 --duration 15 --resolution 1080p
 
-# 指定输出目录
-./scripts/one-click-generate.sh "..." -o /path/to/output
+# 2. 生成配音（MiniMax TTS）
+python3 -c "
+import requests, binascii, os
+KEY = os.getenv('MINIMAX_API_KEY')
+resp = requests.post('https://api.minimaxi.com/v1/t2a_v2',
+  headers={'Authorization': f'Bearer {KEY}', 'Content-Type': 'application/json'},
+  json={'model': 'speech-2.8-hd', 'text': '小米又搞事情了...', 'stream': False,
+    'voice_setting': {'voice_id': 'male-qn-qingse', 'speed': 1.0, 'vol': 1.0, 'pitch': 0},
+    'audio_setting': {'audio_sample_rate': 32000, 'bitrate': 128000, 'format': 'mp3'}},
+  timeout=60)
+data = resp.json()
+if data['base_resp']['status_code'] == 0:
+    open('voice.mp3', 'wb').write(binascii.unhexlify(data['data']['audio']))
+"
 
-# 批量生成
-./scripts/batch-generate.sh topics.txt
+# 3. 生成 BGM（MiniMax Music）
+python3 -c "
+import requests, binascii, os
+KEY = os.getenv('MINIMAX_API_KEY')
+resp = requests.post('https://api.minimaxi.com/v1/music_generation',
+  headers={'Authorization': f'Bearer {KEY}', 'Content-Type': 'application/json'},
+  json={'model': 'music-1.5', 'prompt': 'electronic, racing, 130bpm, energetic, no vocals',
+    'lyrics': '[Instrumental]', 'stream': False},
+  timeout=120)
+data = resp.json()
+if data['base_resp']['status_code'] == 0:
+    audio = data['data']['audio']
+    if audio.startswith('http'):
+        import requests; audio = requests.get(audio, timeout=60).content
+    else:
+        audio = binascii.unhexlify(audio)
+    open('bgm.mp3', 'wb').write(audio)
+"
+
+# 4. 混音合成
+ffmpeg -y -i voice.mp3 -t 30 -c copy voice-30s.mp3
+ffmpeg -y -i voice-30s.mp3 -i bgm.mp3 \
+  -filter_complex "[1:a]volume=0.18,afade=t=in:st=0:d=1,afade=t=out:st=27:d=2[bgm];[0:a][bgm]amix=inputs=2:duration=shortest:normalize=0" \
+  -c:a aac -b:a 192k mixed.m4a
+ffmpeg -y -i video.mp4 -i mixed.m4a -c:v copy -c:a aac -b:a 192k -shortest final.mp4
 ```
 
-## 🎯 项目结构
-
-每次生成会在 `~/.openclaw/workspace/output/videos/<项目名>/` 下创建：
+## 完整流水线（OpenClaw 自动化）
 
 ```
-<项目名>/
-├── 口播稿-30s.md          # 4 段口播稿（约 150 字）
-├── 分镜-Seedance提示词.md  # 2 段 Seedance 提示词
-├── 分镜表.md              # 5 镜头详细分镜（可选）
-├── segment1.mp4           # 第 1 段视频（Seedance 生成）
-├── segment2.mp4           # 第 2 段视频（Seedance 生成）
-├── final-raw.mp4          # 拼接原始版
-├── final.mp4              # 重新编码版（含字幕）
-├── 配音.mp3               # 配音
-├── bgm/bgm.mp3            # 背景音乐
-├── 字幕.ass               # 字幕源文件
-└── README.md              # 项目说明
+video-pipeline-cn 生成视频 + 字幕
+        ↓
+minimax-audio-cn 生成配音 + BGM
+        ↓
+FFmpeg 混音 + 合成
+        ↓
+30s 完整 MP4（视频+人声+BGM）
 ```
 
-## 🛠️ 高级选项
+## 音频配置
 
-### 自定义时长
+| 组件 | 模型 | 采样率 | 码率 | 声道 |
+|------|------|--------|------|------|
+| 配音 | speech-2.8-hd | 32kHz | 128kbps | 单声道 |
+| BGM | music-1.5 | 44.1kHz | 256kbps | 立体声 |
+| 混音 | AAC | 32kHz | 192kbps | 单声道 |
 
-默认 30 秒（2 段 × 15 秒）。修改 `skills/video-pipeline-cn/SKILL.md`：
+## 推荐音色
 
-```yaml
-# 15 秒短视频（1 段）
-duration: 15
-segments: 1
+| voice_id | 描述 | 场景 |
+|----------|------|------|
+| `male-qn-qingse` | 青年男声 | 资讯/科普 |
+| `male-qn-jingying` | 精英男声 | 商业/财经 |
+| `female-shaonv` | 少女声 | 娱乐/生活 |
+| `female-yujie` | 御姐声 | 高端/科技 |
 
-# 60 秒长视频（4 段）
-duration: 60
-segments: 4
-```
+## 推荐 BGM 风格
 
-### 自定义配音
+| 风格 | prompt |
+|------|--------|
+| 赛车电子 | `electronic, racing, 130bpm, energetic, futuristic, no vocals` |
+| 科技资讯 | `electronic, tech, ambient, 120bpm, mysterious, no vocals` |
+| 电影配乐 | `cinematic, epic, inspiring, orchestral electronic hybrid, no vocals` |
 
-默认用 `macOS say "Eddy 中文"`。换 ElevenLabs：
+## 关键踩坑
 
-```python
-# 修改 skills/video-pipeline-cn/scripts/tts.py
-from elevenlabs import generate, save
+1. **MiniMax TTS 响应是 hex 编码** — 用 `binascii.unhexlify()` 解码
+2. **music-1.5 需要 lyrics 字段** — 纯音乐用 `[Instrumental]` 占位
+3. **music-02 不存在** — 只有 `music-1.5` 和 `music-01`
+4. **BGM 可能返回 URL** — 先用 `startswith('http')` 判断
 
-audio = generate(
-    text=script,
-    voice="<your-voice-id>",
-    model="eleven_multilingual_v2"
-)
-save(audio, "配音.mp3")
-```
-
-### 自定义 BGM
-
-下载免费 BGM 放到 `~/.openclaw/workspace/assets/bgm/`，然后：
+## 环境变量
 
 ```bash
-# 修改 skills/video-pipeline-cn/scripts/mix_audio.py
-BGM_FILE = "~/.openclaw/workspace/assets/bgm/your-track.mp3"
+export ARK_API_KEY="你的火山引擎 Key"      # Seedance 视频
+export MINIMAX_API_KEY="你的 MiniMax Key"   # 音频
 ```
-
-### 自定义字幕样式
-
-编辑 `字幕.ass` 文件中的 `[V4+ Styles]`：
-
-```ass
-Style: Default,字体名,字号,颜色,边框,描边,阴影,位置
-```
-
-常用样式：
-- 白色粗体 + 黑色描边（最常见）
-- 黄色高亮 + 阴影
-- 黑底白字（高对比）
-
-## 📊 性能参考
-
-| 步骤 | 耗时 | 成本 |
-|------|------|------|
-| 改稿 + 分镜 + 提示词 | < 15s | ¥0 |
-| Seedance 段 1（文生） | 5-15 min | ¥0.018 |
-| Seedance 段 2（参考延长） | 10-20 min | ¥0.025 |
-| FFmpeg 拼接 | < 5s | ¥0 |
-| 字幕烧录 | < 30s | ¥0 |
-| 配音（macOS say） | < 5s | ¥0 |
-| BGM 合成 | < 10s | ¥0 |
-| 音视频合并 | < 5s | ¥0 |
-| **总计** | **~15-35 分钟** | **~¥0.04** |
-
-## 🔁 批量生成
-
-把多个主题写到一个文件（每行一个）：
-
-```bash
-# topics.txt
-小米 SU7 Ultra 纽北跑进 7 分
-Claude Opus 4.7 发布
-DeepSeek V4 + 像素灵境
-```
-
-然后运行：
-
-```bash
-./scripts/batch-generate.sh topics.txt
-```
-
-## 🎨 创意技巧
-
-### 1. 多角度 Seedance 提示词
-
-不要只用一段 prompt 描述所有镜头。给每段独立的 prompt，**Seedance 会自动保持风格一致**（同 model + 同 ratio + 同 color palette）。
-
-### 2. 参考视频延长 vs 文生视频
-
-- **文生视频**：开篇、抽象场景、运镜独特
-- **参考视频延长**：细节、产品展示、人物动作
-
-### 3. ASS 字幕的 5 个关键参数
-
-```ass
-FontSize=42           # 字号（屏幕高度 1920 时 42 = 适中）
-PrimaryColour=FFFFFF  # 文字色（白）
-OutlineColour=000000  # 描边色（黑）
-Outline=4             # 描边粗细
-Alignment=2           # 底部居中
-```
-
-### 4. FFmpeg 烧录字幕的 3 个坑
-
-1. **字体**：用 `Hiragino Sans GB`（macOS）或 `Noto Sans CJK SC`（Linux）
-2. **PlayResY**：在 .ass 里**必须**设为视频高度
-3. **换行**：用 `\N`（不是 `\n`）
-
-## 🚨 注意事项
-
-### 1. 品牌安全
-
-Seedance **不支持含写实真人脸部的素材**。所有镜头避开真人。
-
-### 2. Logo 处理
-
-所有 App/品牌 Logo 抽象化（几何符号），避免侵权。
-
-### 3. 时长限制
-
-Seedance 2.0 单次生成最长 15 秒。30 秒视频需要分 2 段。
-
-### 4. 视频 URL 有效期
-
-Seedance 返回的视频 URL 24 小时有效。下载到本地后无此限制。
-
-### 5. API 限流
-
-火山方舟有 QPS 限制。批量生成时建议加 `sleep 5` 避免触发限流。
-
-## 🐛 故障排查
-
-参见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)。
