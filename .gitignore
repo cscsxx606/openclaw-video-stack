@@ -1,0 +1,36 @@
+# ============== 密钥和敏感信息 ==============
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# ============== 火山引擎 / API 相关 ==============
+output/videos/*/final.mp4
+output/videos/*/final-raw.mp4
+output/videos/*/segment*.mp4
+output/videos/*/配音*.mp3
+output/videos/*/配音*.aiff
+output/videos/*/bgm/
+output/videos/*/mixed*.m4a
+output/videos/*/混合音轨.m4a
+
+# ============== 临时文件 ==============
+*.tmp
+*.log
+*.swp
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+venv/
+
+# ============== 编辑器 ==============
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/

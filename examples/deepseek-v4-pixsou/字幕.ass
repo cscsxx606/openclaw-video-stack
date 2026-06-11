@@ -1,0 +1,19 @@
+[Script Info]
+Title: V4 Pixsou Subs
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Hiragino Sans GB,40,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,80,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.50,0:00:02.80,Default,,0,0,0,,AI 圈双喜临门\NDeepSeek V4 发布
+Dialogue: 0,0:00:02.80,0:00:11.00,Default,,0,0,0,,1.6 万亿参数激活 49B\N上下文 100 万 token
+Dialogue: 0,0:00:11.00,0:00:19.50,Default,,0,0,0,,输出价 24 块 1 百万\NFlash 版仅 2 块
+Dialogue: 0,0:00:19.50,0:00:27.50,Default,,0,0,0,,像素灵境 v2.0 上线\N文生视频图生视频 3D 全打通
+Dialogue: 0,0:00:27.50,0:00:30.00,Default,,0,0,0,,AI 视频的 iPhone 时刻\N可能就在今年

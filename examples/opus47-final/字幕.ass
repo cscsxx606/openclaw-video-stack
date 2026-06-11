@@ -1,0 +1,19 @@
+[Script Info]
+Title: Opus 4.7 Subs
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Hiragino Sans GB,40,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,80,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.50,0:00:02.80,Default,,0,0,0,,Anthropic 又放大招\NClaude Opus 4.7 发布
+Dialogue: 0,0:00:02.80,0:00:11.00,Default,,0,0,0,,编程能力直接起飞\NCursor 通过率 58 到 70\NSWE-bench 全球第二
+Dialogue: 0,0:00:11.00,0:00:19.50,Default,,0,0,0,,视觉分辨率拉到 3.75 兆像素\N是上一代 3 倍\NXBOW 精度 54 到 98
+Dialogue: 0,0:00:19.50,0:00:27.50,Default,,0,0,0,,首个搭载网络安全防护\N自动拦截高风险请求
+Dialogue: 0,0:00:27.50,0:00:30.00,Default,,0,0,0,,编程党可升级\N下期讲 Mythos
