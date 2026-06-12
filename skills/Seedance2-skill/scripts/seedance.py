@@ -313,11 +313,34 @@ def cmd_wait_logic(task_id, interval=15, download_dir=None, project=None, max_wa
             resolution = result.get("resolution", "?")
             ratio = result.get("ratio", "?")
 
+            # 计算实际成本（从 API 返回的 usage.completion_tokens）
+            usage = result.get("usage", {})
+            completion_tokens = usage.get("completion_tokens")
+            cost_actual = None
+            if completion_tokens is not None:
+                # 从 DB 取 task 原始参数以判断定价（46 vs 28 元/百万 tokens）
+                actual_cost_calc = None
+                if _DB_AVAILABLE:
+                    try:
+                        t = TaskDB().get(task_id)
+                        if t and t.get("has_video_input"):
+                            actual_cost_calc = completion_tokens * 28 / 1_000_000
+                        else:
+                            actual_cost_calc = completion_tokens * 46 / 1_000_000
+                    except Exception:
+                        pass
+                if actual_cost_calc is None:
+                    # 保守默认：用 46/M
+                    actual_cost_calc = completion_tokens * 46 / 1_000_000
+                cost_actual = round(actual_cost_calc, 4)
+
             print(f"\nVideo generation succeeded!")
             print(f"  Duration: {duration}s | Resolution: {resolution} | Ratio: {ratio}")
             print(f"  Video URL: {video_url}")
             if last_frame_url:
                 print(f"  Last Frame URL: {last_frame_url}")
+            if cost_actual is not None:
+                print(f"  Actual cost: ¥{cost_actual:.4f} ({completion_tokens} tokens)")
 
             local_path = None
             if download_dir and video_url:
@@ -340,11 +363,14 @@ def cmd_wait_logic(task_id, interval=15, download_dir=None, project=None, max_wa
             # 更新任务登记册
             if _DB_AVAILABLE:
                 try:
-                    TaskDB().update_status(
-                        task_id, "succeeded",
-                        video_url=video_url, last_frame_url=last_frame_url,
-                        local_path=local_path,
-                    )
+                    update_kwargs = {
+                        "video_url": video_url,
+                        "last_frame_url": last_frame_url,
+                        "local_path": local_path,
+                    }
+                    if cost_actual is not None:
+                        update_kwargs["cost_actual"] = cost_actual
+                    TaskDB().update_status(task_id, "succeeded", **update_kwargs)
                 except Exception as e:
                     print(f"⚠️  更新任务登记失败: {e}", file=sys.stderr)
 

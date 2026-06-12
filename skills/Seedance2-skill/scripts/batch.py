@@ -111,7 +111,7 @@ def submit_one(index, task_cfg, project, batch_id, max_retries=1, _mock=None):
     if prompt:
         content.insert(0, {"type": "text", "text": prompt})
 
-    body = {"model": task_cfg.get("model", seedance.DEFAULT_MODEL), "content": content}
+    body = {"model": task_cfg.get("model") or seedance.DEFAULT_MODEL, "content": content}
     for k in ("ratio", "duration", "resolution", "seed", "camera_fixed", "watermark",
               "generate_audio", "draft", "return_last_frame", "frames",
               "execution_expires_after", "callback_url"):

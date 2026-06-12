@@ -215,14 +215,16 @@ python3 scripts/batch.py --config tasks.json --max-workers 3
 | 选项 | 折扣 | 代价 | 限制 | 实测成本 |
 |------|------|------|------|---------|
 | `--service-tier flex` | **5 折** | 可能排队 2-3x | **不可与 draft 同时用**；**Seedance 2.0 不支持** | 15s 1080p ≈ ¥16.81 |
-| `--draft true` (1.5 Pro) | **4 折** | 草稿画质 | **强制 resolution 480p** | 4s 480p ≈ ¥1.12 |
+| `--draft true` (1.5 Pro) | **4 折** | 草稿画质 | **强制 resolution 480p**；**Seedance 2.0 不支持** | 4s 480p ≈ ¥1.12 |
 | `--resolution 720p/480p` | **0.5x/0.25x tokens** | 画质降 | 480p 与 480p 草稿同 | - |
 | `--duration 5` vs 15 | **1/3** | 单镜头短 | - | - |
 
 **重点（2026-06-12 真 API 验证）**：
 - `draft + flex` 同时用会报 400（只支持 service_tier=default）
 - `draft` 模式 **强制 480p**，设置 720p/1080p 会报 400
-- **Seedance 2.0 不支持 `service_tier` 字段**（会报 `must be empty`）——只能用 draft + 720p 降本，或省点
+- **Seedance 2.0 不支持 `draft` 字段**（已验证 2026-06-12，报 `draft is not supported for model doubao-seedance-2-0 in t2v, must be empty`）
+- **Seedance 2.0 不支持 `service_tier` 字段**（已验证 2026-06-12，报 `must be empty`）
+- **Seedance 2.0 + 720p 实测**：4s 720p = 87,300 tokens（0.444x of 1080p），¥4.02，3.9 min（**实际比 1080p 快**）
 - **api_request 改 raise 异常**（P0 修复）：batch 重试逻辑才会真正生效
 
 **组合拳**（最便宜的"先看效果"流程）：

@@ -45,9 +45,9 @@ DRAFT_DISCOUNT = 0.5
 
 # 分辨率缩放
 # 480p 0.25x：2026-06-12 实测验证（基于 1.5 Pro + draft 反推，反推公式见 REFERENCE_POINTS）
-# 720p 0.5x：理论值（面积 1/4，线数 1/2），无 720p 真实数据验证
+# 720p 0.444x：2026-06-12 实测验证（Seedance 2.0 4s 720p = 87300 tokens，1080p = 196425，比例 0.444）
 # 1080p 1.0x：实测 4s 1080p = 196,425 tokens
-RESOLUTION_FACTOR = {"480p": 0.25, "720p": 0.5, "1080p": 1.0}
+RESOLUTION_FACTOR = {"480p": 0.25, "720p": 0.444, "1080p": 1.0}
 
 
 def estimate_cost(duration, has_video_input=False, flex=False, draft=False, resolution="1080p"):
@@ -90,6 +90,7 @@ REFERENCE_POINTS = [
     (4,  False, False, False, "1080p",  9.04, "cgt-20260612093622-zwxq2 (4s 1080p 纯文生)"),
     (4,  False, False, True,  "480p",   1.12, "cgt-20260612092619-p255n (4s 480p draft)"),
     (4,  False, False, True,  "480p",   1.12, "cgt-20260612092619-rbtzw (4s 480p draft)"),
+    (4,  False, False, False, "720p",   4.02, "cgt-20260612110302-6h5tw (4s 720p, 2026-06-12 新验证)"),
     # 4s 1080p 验证：4/15 * 731025 * 46/1M = 8.97元。实测 9.04，误差 0.8%（可接受）
     # 4s 480p draft 验证：4/15 * 731025 * 0.25(480p) * 0.5(draft) * 46/1M = 1.12元。实测 1.12 ✅
 ]
