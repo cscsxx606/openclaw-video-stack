@@ -167,13 +167,169 @@ python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/one_click_video.p
 
 > 推荐：草稿用 1.5P draft → 确认后用 720p 并发 → 最终用 1080p
 
-## 🔄 后续可扩展（P2 已整合）
+## 🔄 后续可扩展（P1 + P2 已整合）
 
-- ✅ **接入 videocut-skills → 自动后处理**（剪口播 + 高清化 + 字幕）
-- ✅ **接入 video-use → 专业级视频合成**（per-segment extract + lossless concat + 调色）
+- ✅ **P0: 自动视频合成 + TTS fallback + 720p 降本**
+- ✅ **P2: videocut-skills 整合**（剪口播 + 高清化 + 字幕）
+- ✅ **P2: video-use 整合**（专业级合成 + 调色）
+- ✅ **P1: 批量文章→视频**（批量生成）
+- ✅ **P1: 多平台自动上传**（抖音/快手/小红书/B站）
 - 接入 `hf-hyperframes` → 加片头片尾动画
 - 接入 `hf-remotion-to-hyperframes` → 批量栏目化
-- **接入 `social-auto-upload` → 多平台分发（抖音/快手/视频号/小红书）** ⬅️ 2026-06-11 已规划
+
+---
+
+## 📦 P1 批量文章→视频
+
+> 2026-06-12 新增：批量读取 articles/ 目录，自动生成多个视频
+
+### 用法
+
+```bash
+# 批量生成（默认处理全部文章）
+python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/batch_article_to_video.py \
+    --articles-dir ~/output/articles/ \
+    --output-dir ~/output/videos/batch/ \
+    --budget 20 \
+    --max-workers 4
+
+# 限制处理数量
+python3 scripts/batch_article_to_video.py \
+    --articles-dir ~/output/articles/ \
+    --output-dir ~/output/videos/batch/ \
+    --budget 20 \
+    --limit 10
+```
+
+### 功能
+
+- 自动扫描 `articles/` 目录下的 `.md` 文件
+- 每篇文章调用 `one_click_video.py` 生成视频
+- 自动选择分辨率（预算 < ¥20 → 720p）
+- 生成批量报告（`batch_report.json`）
+- 间隔 5s 避免 API rate limit
+
+### 输出
+
+```
+~/output/videos/batch/
+├── batch_report.json          # 批量生成报告
+├── article-1/
+│   ├── 口播稿-30s.md
+│   ├── 最终成片.mp4
+│   └── ...
+├── article-2/
+│   ├── 口播稿-30s.md
+│   ├── 最终成片.mp4
+│   └── ...
+└── ...
+```
+
+### 报告格式
+
+```json
+{
+  "total": 10,
+  "success": 9,
+  "failed": 1,
+  "total_time": 1800.5,
+  "avg_time": 180.1,
+  "results": [
+    {"article": "xxx.md", "video": ".../最终成片.mp4", "elapsed": 150.2, "success": true}
+  ]
+}
+```
+
+---
+
+## 📤 P1 多平台自动上传
+
+> 2026-06-12 新增：整合 social-auto-upload，一键分发到多平台
+
+### 支持平台
+
+| 平台 | 状态 | Cookie 获取 |
+|------|------|-------------|
+| **抖音** | ✅ 支持 | `get_douyin_cookie.py` |
+| **快手** | ✅ 支持 | `get_ks_cookie.py` |
+| **小红书** | ✅ 支持 | `get_xhs_cookie.py` |
+| **B站** | ✅ 支持 | `get_bilibili_cookie.py` |
+| **视频号** | ⚠️ 需额外配置 | `get_tencent_cookie.py` |
+
+### 用法
+
+```bash
+# 上传到多个平台
+python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/auto_upload.py \
+    --video ~/output/videos/my-video/最终成片.mp4 \
+    --platforms douyin,kuaishou,xhs \
+    --title "小米 SU7 Ultra 纽北跑进 7 分" \
+    --tags "小米,汽车,纽北" \
+    --desc "30秒快讯"
+
+# 上传后自动分发（结合批量生成）
+python3 scripts/batch_article_to_video.py \
+    --articles-dir ~/output/articles/ \
+    --output-dir ~/output/videos/batch/ \
+    --budget 20
+
+# 然后批量上传
+for video in ~/output/videos/batch/*/最终成片.mp4; do
+    python3 scripts/auto_upload.py \
+        --video "$video" \
+        --platforms douyin,xhs \
+        --title "$(basename $(dirname $video))" \
+        --tags "AI,科技"
+done
+```
+
+### 配置
+
+1. **安装 social-auto-upload**
+```bash
+cd ~/.openclaw/workspace/skills/
+git clone https://github.com/dreammis/social-auto-upload.git
+```
+
+2. **获取各平台 Cookie**
+```bash
+cd social-auto-upload
+python3 examples/get_douyin_cookie.py    # 抖音
+python3 examples/get_ks_cookie.py        # 快手
+python3 examples/get_xhs_cookie.py       # 小红书
+python3 examples/get_bilibili_cookie.py  # B站
+```
+
+3. **Cookie 文件位置**
+```
+~/.openclaw/workspace/cookies/
+├── douyin_uploader.json
+├── ks_uploader.json
+├── xhs_uploader.json
+└── bilibili_uploader.json
+```
+
+### 注意事项
+
+1. **首次需手动扫码登录**：获取 Cookie 后后续复用
+2. **间隔 10s 防风控**：平台间上传间隔 10 秒
+3. **视频号需额外配置**：暂不支持自动上传
+4. **Cookie 会过期**：定期重新获取
+5. **平台网页结构更新**：可能导致脚本失效
+
+### 输出
+
+```
+📊 上传报告
+   抖音: ✅ 成功
+   快手: ✅ 成功
+   小红书: ✅ 成功
+   B站: ❌ 失败
+
+   总计: 4 平台
+   ✅ 成功: 3
+   ❌ 失败: 1
+```
 
 ---
 
