@@ -167,13 +167,81 @@ python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/one_click_video.p
 
 > 推荐：草稿用 1.5P draft → 确认后用 720p 并发 → 最终用 1080p
 
-## 🔄 后续可扩展
+## 🔄 后续可扩展（P2 已整合）
 
-- 接入 `video-use` skill → 自动剪辑成片
-- 接入 `videocut-剪口播` → 优化口播节奏
+- ✅ **接入 videocut-skills → 自动后处理**（剪口播 + 高清化 + 字幕）
+- 接入 `video-use` skill → 专业视频编辑
 - 接入 `hf-hyperframes` → 加片头片尾动画
 - 接入 `hf-remotion-to-hyperframes` → 批量栏目化
 - **接入 `social-auto-upload` → 多平台分发（抖音/快手/视频号/小红书）** ⬅️ 2026-06-11 已规划
+
+---
+
+## 🎬 P2 视频后处理（videocut-skills 整合）
+
+> 2026-06-12 新增：一键调用 videocut-skills 的剪口播、高清化、导入字幕能力
+
+### 功能
+
+| 功能 | 脚本 | 说明 |
+|------|------|------|
+| **剪口播** | `post_process.py --mode cut` | 口误识别 + 自动剪辑 |
+| **高清化** | `post_process.py --mode hd` | 2-pass 编码 + 锐化 |
+| **导入字幕** | `post_process.py --mode subtitle` | 剪映草稿生成 |
+| **全部** | `post_process.py --mode all` | 剪口播 → 高清化 → 字幕 |
+
+### 用法
+
+```bash
+# 全部后处理（剪口播 → 高清化 → 字幕）
+python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/post_process.py \
+    --video ~/output/videos/my-video/最终成片.mp4 \
+    --mode all \
+    --auto-confirm
+
+# 仅剪口播
+python3 scripts/post_process.py --video final.mp4 --mode cut
+
+# 仅高清化（1.5x 码率）
+python3 scripts/post_process.py --video final.mp4 --mode hd --bitrate-multiplier 1.5
+
+# 仅字幕（带花字）
+python3 scripts/post_process.py --video final.mp4 --mode subtitle \
+    --effect 火焰燃烧花字 --anim 渐显
+```
+
+### 依赖
+
+| 工具 | 路径 | 状态 |
+|------|------|------|
+| `cut_video.sh` | `videocut-skills/剪口播/scripts/` | ✅ 已装 |
+| `hd_export.sh` | `videocut-skills/高清化/scripts/` | ✅ 已装 |
+| `srt_to_draft.py` | `videocut-skills/导入字幕/scripts/` | ✅ 已装 |
+| `VOLCENGINE_API_KEY` | `.env` 文件 | ⚠️ 需配置 |
+
+### 注意事项
+
+1. **剪口播需要火山引擎 API Key**：在 `.env` 填入 `VOLCENGINE_API_KEY=xxx`
+2. **首次字幕需要 capcut-mate 服务**：`srt_to_draft.py` 会自动检测安装
+3. **高清化可选**：剪辑后画质已很好，高清化是额外增强
+4. **人工审核**：默认生成审核网页，加 `--auto-confirm` 跳过
+
+### 输出
+
+```
+post/
+├── 剪口播_最终成片/
+│   ├── 1_转录/
+│   │   ├── audio.mp3
+│   │   └── subtitles_words.json
+│   ├── 2_分析/
+│   │   └── auto_selected.json
+│   └── 3_审核/
+│       ├── review.html
+│       └── 最终成片_cut.mp4
+├── 最终成片_hd.mp4          # 高清化后
+└── video.srt                # 字幕文件
+```
 
 ---
 
