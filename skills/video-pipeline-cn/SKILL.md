@@ -167,15 +167,15 @@ python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/one_click_video.p
 
 > 推荐：草稿用 1.5P draft → 确认后用 720p 并发 → 最终用 1080p
 
-## 🔄 后续可扩展（P1 + P2 已整合）
+## 🔄 后续可扩展（全部已整合）
 
 - ✅ **P0: 自动视频合成 + TTS fallback + 720p 降本**
-- ✅ **P2: videocut-skills 整合**（剪口播 + 高清化 + 字幕）
-- ✅ **P2: video-use 整合**（专业级合成 + 调色）
 - ✅ **P1: 批量文章→视频**（批量生成）
 - ✅ **P1: 多平台自动上传**（抖音/快手/小红书/B站）
-- 接入 `hf-hyperframes` → 加片头片尾动画
-- 接入 `hf-remotion-to-hyperframes` → 批量栏目化
+- ✅ **P2: videocut-skills 整合**（剪口播 + 高清化 + 字幕）
+- ✅ **P2: video-use 整合**（专业级合成 + 调色）
+- ✅ **P2: hf-hyperframes 片头片尾动画**
+- ✅ **P2: hf-remotion-to-hyperframes 批量栏目化**
 
 ---
 
@@ -333,9 +333,9 @@ python3 examples/get_bilibili_cookie.py  # B站
 
 ---
 
-## 🎬 P2 视频后处理（videocut-skills + video-use 整合）
+## 🎬 P2 视频后处理（全部整合）
 
-> 2026-06-12 新增：一键调用 videocut-skills 和 video-use 的专业视频编辑能力
+> 2026-06-12 新增：一键调用 videocut-skills、video-use、hf-hyperframes 的专业视频编辑能力
 
 ### 功能
 
@@ -346,6 +346,8 @@ python3 examples/get_bilibili_cookie.py  # B站
 | **导入字幕** | `post_process.py --mode subtitle` | 剪映草稿生成 |
 | **全部后处理** | `post_process.py --mode all` | 剪口播 → 高清化 → 字幕 |
 | **video-use 合成** | `video_use_compose.py` | 专业级视频合成（per-segment + lossless concat + 调色）|
+| **片头片尾动画** | `generate_intros.py` | HyperFrames 生成片头/片尾（3 种风格）|
+| **批量栏目化** | `batch_series.py` | 批量生成系列视频（统一包装 + 不同内容）|
 
 ### video-use 标准合成（新增）
 
@@ -503,3 +505,156 @@ post/
 2. 首次需手动扫码登录，后续 Cookie 复用
 3. 平台网页结构更新可能导致脚本失效
 4. 建议控制发布频率，避免触发风控
+
+---
+
+## 🎬 P2 视频后处理（全部整合）
+
+> 2026-06-12 新增：一键调用 videocut-skills、video-use、hf-hyperframes 的专业视频编辑能力
+
+### 功能
+
+| 功能 | 脚本 | 说明 |
+|------|------|------|
+| **剪口播** | `post_process.py --mode cut` | 口误识别 + 自动剪辑 |
+| **高清化** | `post_process.py --mode hd` | 2-pass 编码 + 锐化 |
+| **导入字幕** | `post_process.py --mode subtitle` | 剪映草稿生成 |
+| **全部后处理** | `post_process.py --mode all` | 剪口播 → 高清化 → 字幕 |
+| **video-use 合成** | `video_use_compose.py` | 专业级视频合成（per-segment + lossless concat + 调色）|
+| **片头片尾动画** | `generate_intros.py` | HyperFrames 生成片头/片尾（3 种风格）|
+| **批量栏目化** | `batch_series.py` | 批量生成系列视频（统一包装 + 不同内容）|
+
+### hf-hyperframes 片头片尾动画
+
+> 基于 hf-hyperframes/SKILL.md 的 HTML + GSAP 动画系统
+
+```bash
+# 生成片头片尾（单独）
+python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/generate_intros.py \
+    --brand "像素灵境" \
+    --title "AI 视频生产指南" \
+    --output-dir ~/output/videos/my-video/intros/ \
+    --style tech
+
+# 生成片头片尾 + 合成到视频
+python3 scripts/generate_intros.py \
+    --brand "像素灵境" \
+    --title "AI 视频生产指南" \
+    --output-dir ~/output/videos/my-video/ \
+    --style tech \
+    --main-video ~/output/videos/my-video/最终成片.mp4
+```
+
+#### 风格预设
+
+| 风格 | 背景 | 强调色 | 字体 | 适用场景 |
+|------|------|--------|------|----------|
+| `tech` | #0a0a0a 深色 | #FF5A00 橙色 | Menlo monospace | 科技产品、技术教程 |
+| `minimal` | #ffffff 白色 | #000000 黑色 | Helvetica | 极简、商务 |
+| `cinematic` | 渐变蓝紫 | #e94560 红色 | Georgia serif | 电影感、叙事 |
+
+#### 输出
+
+```
+intros/
+├── intro.mp4              # 片头（3s）
+├── outro.mp4              # 片尾（3s）
+└── 最终成片_含片头片尾.mp4  # 合成后（如提供主视频）
+```
+
+### hf-remotion-to-hyperframes 批量栏目化
+
+> 将 Remotion 栏目模板转换为 HyperFrames，批量生成系列视频
+
+```bash
+# 使用默认模板批量生成
+python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/batch_series.py \
+    --articles-dir ~/output/articles/ \
+    --output-dir ~/output/videos/series/ \
+    --brand "像素灵境" \
+    --series-name "AI 产品测评" \
+    --limit 10
+
+# 转换 Remotion 模板后生成
+python3 scripts/batch_series.py \
+    --template-dir ~/templates/tech-review/ \
+    --articles-dir ~/output/articles/ \
+    --output-dir ~/output/videos/series/ \
+    --brand "像素灵境" \
+    --series-name "AI 产品测评" \
+    --convert-template
+```
+
+#### 栏目模板结构
+
+```
+template/
+├── index.html              # 根合成（片头 + 主内容槽 + 片尾）
+├── compositions/
+│   ├── intro.html          # 片头动画
+│   ├── outro.html          # 片尾动画
+│   ├── main.html           # 主内容（动态替换）
+│   └── transition.html     # 转场动画
+└── assets/
+    ├── logo.png
+    └── bg.mp4
+```
+
+#### 输出
+
+```
+series/
+├── template/               # 栏目模板
+├── article-1.mp4          # 第 1 期
+├── article-2.mp4          # 第 2 期
+├── ...
+└── series_report.json     # 批量报告
+```
+
+### 依赖
+
+| 工具 | 路径 | 状态 |
+|------|------|------|
+| `cut_video.sh` | `videocut-skills/剪口播/scripts/` | ✅ 已装 |
+| `hd_export.sh` | `videocut-skills/高清化/scripts/` | ✅ 已装 |
+| `srt_to_draft.py` | `videocut-skills/导入字幕/scripts/` | ✅ 已装 |
+| `video-use` | `skills/video-use/` | ✅ 已装 |
+| `hf-hyperframes` | `skills/hf-hyperframes/` | ✅ 已装 |
+| `hf-remotion-to-hyperframes` | `skills/hf-remotion-to-hyperframes/` | ✅ 已装 |
+| `npx hyperframes` | Node.js 全局 | ⚠️ 需 Node.js 22+ |
+| `VOLCENGINE_API_KEY` | `.env` 文件 | ⚠️ 需配置 |
+
+### 注意事项
+1. **hf-hyperframes 需要 Node.js 22+**：`npx hyperframes render` 需要较新 Node 版本
+2. **片头片尾时长固定 3s**：可通过 `--duration` 调整
+3. **批量栏目化需要模板**：首次使用会创建默认模板
+4. **Remotion 转换有限制**：`useState`/`useEffect` 等需手动处理
+5. **所有 P2 功能是可选的**：基础视频生成不依赖这些
+
+### 完整工作流示例
+
+```bash
+# 1. 一键生成视频（P0）
+python3 scripts/one_click_video.py \
+    --article ~/output/articles/my-article.md \
+    --budget 20
+
+# 2. 添加片头片尾（P2 - hf-hyperframes）
+python3 scripts/generate_intros.py \
+    --brand "像素灵境" \
+    --title "AI 视频生产指南" \
+    --main-video ~/output/videos/my-article/最终成片.mp4 \
+    --style tech
+
+# 3. 后处理（P2 - videocut-skills）
+python3 scripts/post_process.py \
+    --video ~/output/videos/my-article/最终成片_含片头片尾.mp4 \
+    --mode all
+
+# 4. 上传（P1）
+python3 scripts/auto_upload.py \
+    --video ~/output/videos/my-article/最终成片_含片头片尾_hd.mp4 \
+    --platforms douyin,xhs \
+    --title "AI 视频生产指南" \
+    --tags "AI,视频"
+```
