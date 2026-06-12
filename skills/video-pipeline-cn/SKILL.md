@@ -170,16 +170,16 @@ python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/one_click_video.p
 ## 🔄 后续可扩展（P2 已整合）
 
 - ✅ **接入 videocut-skills → 自动后处理**（剪口播 + 高清化 + 字幕）
-- 接入 `video-use` skill → 专业视频编辑
+- ✅ **接入 video-use → 专业级视频合成**（per-segment extract + lossless concat + 调色）
 - 接入 `hf-hyperframes` → 加片头片尾动画
 - 接入 `hf-remotion-to-hyperframes` → 批量栏目化
 - **接入 `social-auto-upload` → 多平台分发（抖音/快手/视频号/小红书）** ⬅️ 2026-06-11 已规划
 
 ---
 
-## 🎬 P2 视频后处理（videocut-skills 整合）
+## 🎬 P2 视频后处理（videocut-skills + video-use 整合）
 
-> 2026-06-12 新增：一键调用 videocut-skills 的剪口播、高清化、导入字幕能力
+> 2026-06-12 新增：一键调用 videocut-skills 和 video-use 的专业视频编辑能力
 
 ### 功能
 
@@ -188,9 +188,66 @@ python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/one_click_video.p
 | **剪口播** | `post_process.py --mode cut` | 口误识别 + 自动剪辑 |
 | **高清化** | `post_process.py --mode hd` | 2-pass 编码 + 锐化 |
 | **导入字幕** | `post_process.py --mode subtitle` | 剪映草稿生成 |
-| **全部** | `post_process.py --mode all` | 剪口播 → 高清化 → 字幕 |
+| **全部后处理** | `post_process.py --mode all` | 剪口播 → 高清化 → 字幕 |
+| **video-use 合成** | `video_use_compose.py` | 专业级视频合成（per-segment + lossless concat + 调色）|
 
-### 用法
+### video-use 标准合成（新增）
+
+> 基于 video-use/SKILL.md 的 Hard Rules 1-12
+
+```bash
+# video-use 标准合成（per-segment extract + lossless concat + 调色 + 字幕 LAST）
+python3 ~/.openclaw/workspace/skills/video-pipeline-cn/scripts/video_use_compose.py \
+    --video-segments ~/output/videos/my-video/seg1.mp4 ~/output/videos/my-video/seg2.mp4 \
+    --audio ~/output/videos/my-video/配音.mp3 \
+    --subtitles ~/output/videos/my-video/字幕.ass \
+    --output ~/output/videos/my-video/最终成片_vu.mp4 \
+    --grade warm_cinematic
+```
+
+#### video-use 标准 vs 普通合成
+
+| 特性 | video-use 标准 (`video_use_compose.py`) | 普通合成 (`auto_compose.py`) |
+|------|----------------------------------------|------------------------------|
+| **视频拼接** | Per-segment extract + lossless concat | FFmpeg concat（可能 re-encode）|
+| **音频边界** | 30ms fade（防 pop） | 直接拼接 |
+| **调色** | ASC CDL 风格（warm_cinematic / neutral_punch） | 无 |
+| **字幕** | LAST in filter chain（防 overlay 遮挡） | 普通 subtitles filter |
+| **质量** | 专业级（匹配原片参数） | 标准级 |
+| **速度** | 较慢（2-pass） | 较快（1-pass）|
+
+#### 调色预设
+
+| 预设 | 风格 | 适用场景 |
+|------|------|----------|
+| `warm_cinematic` | 复古/技术感，青橙分离，低饱和 | 科技产品、演讲 |
+| `neutral_punch` | 对比度提升 + 柔和 S 曲线 | 通用、自然 |
+| `none` | 原片直出 | 快速预览 |
+
+#### 用法示例
+
+```bash
+# 1. 暖色电影感（科技产品）
+python3 scripts/video_use_compose.py \
+    --video-segments seg1.mp4 seg2.mp4 \
+    --audio audio.mp3 --subtitles subs.ass \
+    --output final.mp4 --grade warm_cinematic
+
+# 2. 自然增强（通用）
+python3 scripts/video_use_compose.py \
+    --video-segments seg1.mp4 seg2.mp4 \
+    --audio audio.mp3 --subtitles subs.ass \
+    --output final.mp4 --grade neutral_punch
+
+# 3. 自定义 filter（高级）
+python3 scripts/video_use_compose.py \
+    --video-segments seg1.mp4 seg2.mp4 \
+    --audio audio.mp3 --subtitles subs.ass \
+    --output final.mp4 \
+    --custom-filter "eq=contrast=1.2:saturation=1.1"
+```
+
+### videocut-skills 后处理
 
 ```bash
 # 全部后处理（剪口播 → 高清化 → 字幕）
@@ -217,14 +274,19 @@ python3 scripts/post_process.py --video final.mp4 --mode subtitle \
 | `cut_video.sh` | `videocut-skills/剪口播/scripts/` | ✅ 已装 |
 | `hd_export.sh` | `videocut-skills/高清化/scripts/` | ✅ 已装 |
 | `srt_to_draft.py` | `videocut-skills/导入字幕/scripts/` | ✅ 已装 |
+| `video-use` | `skills/video-use/` | ✅ 已装 |
 | `VOLCENGINE_API_KEY` | `.env` 文件 | ⚠️ 需配置 |
 
 ### 注意事项
 
 1. **剪口播需要火山引擎 API Key**：在 `.env` 填入 `VOLCENGINE_API_KEY=xxx`
-2. **首次字幕需要 capcut-mate 服务**：`srt_to_draft.py` 会自动检测安装
-3. **高清化可选**：剪辑后画质已很好，高清化是额外增强
-4. **人工审核**：默认生成审核网页，加 `--auto-confirm` 跳过
+2. **video-use 合成较慢**：per-segment extract + 2-pass 编码，质量更好
+3. **调色是可选的**：默认 `none`（原片直出），需要时加 `--grade`
+4. **字幕 LAST 规则**：video-use 标准合成确保字幕在 overlay 之后应用
+5. **音频 fade**：video-use 标准合成在段边界加 30ms fade，防止 pop
+6. **首次字幕需要 capcut-mate 服务**：`srt_to_draft.py` 会自动检测安装
+7. **高清化可选**：剪辑后画质已很好，高清化是额外增强
+8. **人工审核**：默认生成审核网页，加 `--auto-confirm` 跳过
 
 ### 输出
 
@@ -240,7 +302,8 @@ post/
 │       ├── review.html
 │       └── 最终成片_cut.mp4
 ├── 最终成片_hd.mp4          # 高清化后
-└── video.srt                # 字幕文件
+├── video.srt                # 字幕文件
+└── 最终成片_vu.mp4          # video-use 标准合成（如使用）
 ```
 
 ---
