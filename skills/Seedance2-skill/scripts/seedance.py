@@ -14,6 +14,9 @@ Seedance 视频生成 CLI（Volcengine Ark API）
   python3 seedance.py wait <task_id> [--interval 15] [--download DIR]
   python3 seedance.py list [--status succeeded] [--page 1] [--page-size 10]
   python3 seedance.py delete <task_id>
+
+# 任务持久化：默认写入 SQLite 任务登记册（~/.openclaw/workspace/data/seedance_tasks.db）
+# 跳过登记请加 --no-db；指定项目名便于分类查询 --project <name>
 """
 
 import argparse
@@ -26,6 +29,14 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+# 任务登记册（可选；导入失败时不影响主功能）
+try:
+    from db import TaskDB
+    _DB_AVAILABLE = True
+except ImportError:
+    _DB_AVAILABLE = False
+    TaskDB = None
 
 
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
@@ -65,19 +76,30 @@ def api_request(method, url, data=None):
             error_msg = error_json.get("error", {}).get("message", error_body)
         except json.JSONDecodeError:
             error_msg = error_body
-        print(f"API Error (HTTP {e.code}): {error_msg}", file=sys.stderr)
-        sys.exit(1)
+        # raise 而非 sys.exit：让调用方（batch 重试 / cmd_create CLI）决定如何处理
+        raise SeedanceAPIError(e.code, error_msg) from e
     except urllib.error.URLError as e:
-        print(f"Network Error: {e.reason}", file=sys.stderr)
-        sys.exit(1)
+        raise SeedanceNetworkError(e.reason) from e
+
+
+class SeedanceAPIError(Exception):
+    """Seedance API 返回的错误（4xx/5xx）"""
+    def __init__(self, status_code, message):
+        self.status_code = status_code
+        self.message = message
+        super().__init__(f"API Error (HTTP {status_code}): {message}")
+
+
+class SeedanceNetworkError(Exception):
+    """网络错误（超时、连接失败等）"""
+    pass
 
 
 def image_to_data_url(image_path):
     """Convert a local image file to a base64 data URL."""
     p = Path(image_path)
     if not p.exists():
-        print(f"Error: Image file not found: {image_path}", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"Image file not found: {image_path}")
 
     ext = p.suffix.lower().lstrip(".")
     mime_map = {
@@ -89,8 +111,7 @@ def image_to_data_url(image_path):
 
     file_size = p.stat().st_size
     if file_size > 30 * 1024 * 1024:
-        print(f"Error: Image file too large ({file_size / 1024 / 1024:.1f} MB). Max 30 MB.", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError(f"Image file too large ({file_size / 1024 / 1024:.1f} MB). Max 30 MB.")
 
     with open(p, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("ascii")
@@ -109,14 +130,12 @@ def file_to_data_url(file_path, media_type):
     """Convert a local file to a base64 data URL. media_type: 'video' or 'audio'."""
     p = Path(file_path)
     if not p.exists():
-        print(f"Error: {media_type.title()} file not found: {file_path}", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"{media_type.title()} file not found: {file_path}")
 
     max_size = {"video": 50, "audio": 15}.get(media_type, 50)
     file_size = p.stat().st_size
     if file_size > max_size * 1024 * 1024:
-        print(f"Error: {media_type.title()} file too large ({file_size / 1024 / 1024:.1f} MB). Max {max_size} MB.", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError(f"{media_type.title()} file too large ({file_size / 1024 / 1024:.1f} MB). Max {max_size} MB.")
 
     mime, _ = mimetypes.guess_type(str(p))
     if not mime:
@@ -197,40 +216,59 @@ def cmd_create(args):
         "content": content,
     }
 
-    if args.ratio:
-        body["ratio"] = args.ratio
-    if args.duration is not None:
-        body["duration"] = args.duration
-    if args.resolution:
-        body["resolution"] = args.resolution
-    if args.seed is not None:
-        body["seed"] = args.seed
-    if args.camera_fixed is not None:
-        body["camera_fixed"] = args.camera_fixed
-    if args.watermark is not None:
-        body["watermark"] = args.watermark
-    if args.generate_audio is not None:
-        body["generate_audio"] = args.generate_audio
-    if args.draft is not None:
-        body["draft"] = args.draft
-    if args.return_last_frame is not None:
-        body["return_last_frame"] = args.return_last_frame
-    if args.service_tier:
-        body["service_tier"] = args.service_tier
-    if getattr(args, 'frames', None) is not None:
-        body["frames"] = args.frames
-    if getattr(args, 'execution_expires_after', None) is not None:
-        body["execution_expires_after"] = args.execution_expires_after
+    # 过滤掉 service_tier 以外的可选参数
+    for k in ("ratio", "duration", "resolution", "seed", "camera_fixed",
+              "watermark", "generate_audio", "draft", "return_last_frame",
+              "frames", "execution_expires_after"):
+        v = getattr(args, k, None)
+        if v is not None:
+            body[k] = v
     if getattr(args, 'callback_url', None):
         body["callback_url"] = args.callback_url
+    # service_tier 特殊处理：仅 "flex" 才发送（Seedance 2.0 不支持该字段）
+    if args.service_tier == "flex":
+        body["service_tier"] = "flex"
 
     result = api_request("POST", BASE_URL, body)
     task_id = result.get("id", "")
 
+    # 写入任务登记册（默认开启，--no-db 禁用）
+    if _DB_AVAILABLE and not getattr(args, "no_db", False):
+        try:
+            db = TaskDB()
+            task_kwargs = {
+                "image": args.image,
+                "video": args.video[0] if args.video else None,
+                "audio": args.audio[0] if args.audio else None,
+                "ref_images": args.ref_images,
+                "draft_task_id": args.draft_task_id,
+                "model": args.model,
+                "ratio": args.ratio,
+                "duration": args.duration,
+                "resolution": args.resolution,
+                "service_tier": args.service_tier,
+                "draft": args.draft,
+                "seed": args.seed,
+                "generate_audio": args.generate_audio,
+                "watermark": args.watermark,
+            }
+            db.insert(
+                task_id,
+                project=getattr(args, "project", None),
+                prompt=args.prompt,
+                **task_kwargs,
+            )
+            est_cost = db.get(task_id).get("cost_estimate", 0)
+            print(f"📝 已登记到任务册 (project={args.project or '-'}  预估 ¥{est_cost})", file=sys.stderr)
+        except Exception as e:
+            print(f"⚠️  任务登记失败（不影响主流程）: {e}", file=sys.stderr)
+
     print(json.dumps({"task_id": task_id, "status": "created", "response": result}, indent=2))
 
     if args.wait:
-        return cmd_wait_logic(task_id, args.interval or 15, args.download)
+        return cmd_wait_logic(task_id, args.interval or 15, args.download,
+                               project=getattr(args, "project", None),
+                               max_wait=getattr(args, "max_wait", 1800) or 1800)
 
     return task_id
 
@@ -243,12 +281,28 @@ def cmd_status(args):
     return result
 
 
-def cmd_wait_logic(task_id, interval=15, download_dir=None):
-    """Wait for task completion, optionally download result."""
-    url = f"{BASE_URL}/{task_id}"
-    print(f"Waiting for task {task_id} to complete (polling every {interval}s)...")
+def cmd_wait_logic(task_id, interval=15, download_dir=None, project=None, max_wait=1800):
+    """Wait for task completion, optionally download result.
 
+    Args:
+        max_wait: 单个任务最长等待秒（默认 30 分钟）。超时后退出 1，不入 DB 'expired' 状态。
+    """
+    url = f"{BASE_URL}/{task_id}"
+    print(f"Waiting for task {task_id} to complete (polling every {interval}s, max {max_wait}s)...")
+
+    # 标记 running
+    if _DB_AVAILABLE:
+        try:
+            TaskDB().update_status(task_id, "running")
+        except Exception:
+            pass
+
+    start_ts = time.time()
     while True:
+        if time.time() - start_ts > max_wait:
+            print(f"\n⏱️  超时（>{max_wait}s），退出等待。任务在远端仍在 running。")
+            print(f"   可稍后: python3 seedance.py status {task_id}")
+            sys.exit(1)
         result = api_request("GET", url)
         status = result.get("status", "unknown")
 
@@ -265,6 +319,7 @@ def cmd_wait_logic(task_id, interval=15, download_dir=None):
             if last_frame_url:
                 print(f"  Last Frame URL: {last_frame_url}")
 
+            local_path = None
             if download_dir and video_url:
                 download_path = Path(download_dir).expanduser()
                 download_path.mkdir(parents=True, exist_ok=True)
@@ -274,6 +329,7 @@ def cmd_wait_logic(task_id, interval=15, download_dir=None):
                 print(f"\nDownloading video to {filepath}...")
                 try:
                     urllib.request.urlretrieve(video_url, str(filepath))
+                    local_path = str(filepath)
                     print(f"Saved to: {filepath}")
 
                     if sys.platform == "darwin":
@@ -281,18 +337,46 @@ def cmd_wait_logic(task_id, interval=15, download_dir=None):
                 except Exception as e:
                     print(f"Download failed: {e}", file=sys.stderr)
 
+            # 更新任务登记册
+            if _DB_AVAILABLE:
+                try:
+                    TaskDB().update_status(
+                        task_id, "succeeded",
+                        video_url=video_url, last_frame_url=last_frame_url,
+                        local_path=local_path,
+                    )
+                except Exception as e:
+                    print(f"⚠️  更新任务登记失败: {e}", file=sys.stderr)
+
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return result
 
         elif status == "failed":
             error = result.get("error", {})
+            error_code = error.get("code", "unknown")
+            error_msg = error.get("message", "Unknown error")
             print(f"\nVideo generation failed!")
-            print(f"  Error: {error.get('code', 'unknown')} - {error.get('message', 'Unknown error')}")
+            print(f"  Error: {error_code} - {error_msg}")
+
+            if _DB_AVAILABLE:
+                try:
+                    TaskDB().update_status(
+                        task_id, "failed",
+                        error_code=error_code, error_message=error_msg,
+                    )
+                except Exception:
+                    pass
+
             print(json.dumps(result, indent=2, ensure_ascii=False))
             sys.exit(1)
 
         elif status == "expired":
             print(f"\nVideo generation task expired.")
+            if _DB_AVAILABLE:
+                try:
+                    TaskDB().update_status(task_id, "expired")
+                except Exception:
+                    pass
             print(json.dumps(result, indent=2, ensure_ascii=False))
             sys.exit(1)
 
@@ -303,11 +387,13 @@ def cmd_wait_logic(task_id, interval=15, download_dir=None):
 
 def cmd_wait(args):
     """Wait for task completion."""
-    return cmd_wait_logic(args.task_id, args.interval, args.download)
+    return cmd_wait_logic(args.task_id, args.interval, args.download,
+                           project=getattr(args, "project", None),
+                           max_wait=args.max_wait)
 
 
 def cmd_list(args):
-    """List video generation tasks."""
+    """List video generation tasks (compressed view)."""
     params = []
     if args.page:
         params.append(f"page_num={args.page}")
@@ -321,7 +407,39 @@ def cmd_list(args):
         url += "?" + "&".join(params)
 
     result = api_request("GET", url)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    items = result.get("items", []) if isinstance(result, dict) else result
+
+    # 打印汇总
+    print(f"📋 共 {len(items)} 条任务  页={args.page}  每页={args.page_size}"
+          + (f"  状态={args.status}" if args.status else ""))
+    print(f"{'id':32}  {'status':10}  {'model':24}  {'dur':4}  {'res':5}  {'tokens':>8}  {'est¥':>7}  {'created':12}")
+    print("-" * 120)
+    # 加载本地 cost_estimate（如果有）
+    local_costs = {}
+    if _DB_AVAILABLE:
+        try:
+            # 按多个状态都查一次，覆盖不传状态的情况
+            for st in [args.status] if args.status else ["queued", "running", "succeeded", "failed", "expired", "cancelled"]:
+                for r in TaskDB().list_by_status(st):
+                    local_costs[r["task_id"]] = r.get("cost_estimate") or 0
+        except Exception:
+            pass
+    for it in items:
+        usage = it.get("usage", {}) or {}
+        tokens = usage.get("total_tokens", 0) or 0
+        created = it.get("created_at", 0)
+        created_str = time.strftime("%m-%d %H:%M", time.localtime(created)) if created else "-"
+        # 从本地 DB 拉成本估算
+        est = local_costs.get(it.get("id", ""), 0) or 0
+        est_str = f"¥{est:.2f}" if est else "-"
+        print(f"{it.get('id', '-'):32}  {it.get('status', '-'):10}  "
+              f"{it.get('model', '-'):24}  {it.get('duration', '-'):>4}  "
+              f"{it.get('resolution', '-'):5}  {tokens:>8}  {est_str:>7}  {created_str:12}")
+
+    # 完整 JSON 加 --verbose
+    if getattr(args, "verbose", False):
+        print()
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     return result
 
 
@@ -329,7 +447,63 @@ def cmd_delete(args):
     """Cancel or delete a task."""
     url = f"{BASE_URL}/{args.task_id}"
     api_request("DELETE", url)
+    # 同步本地登记册状态
+    if _DB_AVAILABLE:
+        try:
+            TaskDB().update_status(args.task_id, "cancelled")
+        except Exception as e:
+            print(f"⚠️  同步 DB 状态失败: {e}", file=sys.stderr)
     print(f"Task {args.task_id} cancelled/deleted successfully.")
+
+
+def cmd_db(args):
+    """Local task registry queries (no API call)."""
+    if not _DB_AVAILABLE:
+        print("⚠️  db.py 未找到，本地登记册不可用", file=sys.stderr)
+        sys.exit(1)
+
+    db = TaskDB()
+    sub = args.db_command
+
+    if sub == "show":
+        task = db.get(args.task_id)
+        if task:
+            print(json.dumps(task, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(f"任务不存在: {args.task_id}")
+            sys.exit(1)
+
+    elif sub == "pending":
+        tasks = db.list_pending_recoverable(project=args.project, max_age_hours=args.max_age_hours)
+        print(f"🟡 {len(tasks)} 个未完成任务（{args.max_age_hours}h 内）")
+        if tasks:
+            print(f"{'task_id':34}  {'status':10}  {'est¥':>7}  {'project':15}  {'age':>8}  prompt")
+            print("-" * 100)
+            for t in tasks:
+                prompt = (t.get("prompt") or "")[:50]
+                age_min = (time.time() - t.get("created_at", 0)) / 60
+                print(f"  {t['task_id']:32}  {t['status']:10}  ¥{t.get('cost_estimate', 0):>5.2f}  "
+                      f"{t.get('project') or '-':15}  {age_min:>6.1f}m  {prompt}")
+
+    elif sub == "stats":
+        stats = db.stats(project=args.project)
+        total_count = sum(s["count"] for s in stats)
+        total_cost = sum(s.get("est_total") or 0 for s in stats)
+        print(f"📊 {'项目: ' + args.project if args.project else '全部任务'}  共 {total_count} 条  估算总成本 ¥{total_cost:.2f}")
+        print(f"{'状态':12} {'数量':>5}  {'估算成本':>10}  {'实际成本':>10}")
+        for s in stats:
+            est = s.get("est_total") or 0
+            act = s.get("actual_total") or 0
+            print(f"  {s['status']:10} {s['count']:>5}  ¥{est:>8.2f}  ¥{act:>8.2f}")
+
+    elif sub == "batch":
+        tasks = db.list_by_batch(args.batch_id)
+        print(f"📦 批次 {args.batch_id}: {len(tasks)} 个任务")
+        for t in tasks:
+            print(f"  [{t['batch_index']}] {t['task_id']}  {t['status']:10}  est=¥{t.get('cost_estimate', 0):.4f}")
+
+    else:
+        print("可用子命令: show / pending / stats / batch")
 
 
 def parse_bool(v):
@@ -372,19 +546,36 @@ def main():
     p_create.add_argument("--wait", "-w", action="store_true", help="Wait for completion after creating")
     p_create.add_argument("--interval", type=int, default=15, help="Poll interval in seconds (default: 15)")
     p_create.add_argument("--download", help="Download directory (e.g. ~/Desktop)")
+    p_create.add_argument("--project", help="Project name for task registry (e.g. 'su7', 'holiday-ad')")
+    p_create.add_argument("--no-db", action="store_true", help="Skip writing to task registry")
 
     p_status = subparsers.add_parser("status", help="Query task status")
     p_status.add_argument("task_id", help="Task ID to query")
+
+    # ===== 本地登记册查询子命令（不调远程 API） =====
+    p_db = subparsers.add_parser("db", help="Local task registry queries")
+    db_sub = p_db.add_subparsers(dest="db_command")
+    p_db_show = db_sub.add_parser("show", help="Show task by ID")
+    p_db_show.add_argument("task_id", help="Task ID")
+    p_db_pending = db_sub.add_parser("pending", help="List queued/running tasks")
+    p_db_pending.add_argument("--project", help="Filter by project")
+    p_db_pending.add_argument("--max-age-hours", type=int, default=24, help="Max age in hours (default 24)")
+    p_db_stats = db_sub.add_parser("stats", help="Show stats grouped by status")
+    p_db_stats.add_argument("--project", help="Filter by project")
+    p_db_batch = db_sub.add_parser("batch", help="List tasks in a batch")
+    p_db_batch.add_argument("batch_id", help="Batch ID")
 
     p_wait = subparsers.add_parser("wait", help="Wait for task completion")
     p_wait.add_argument("task_id", help="Task ID to wait for")
     p_wait.add_argument("--interval", type=int, default=15, help="Poll interval in seconds (default: 15)")
     p_wait.add_argument("--download", help="Download directory (e.g. ~/Desktop)")
+    p_wait.add_argument("--max-wait", type=int, default=1800, help="Max wait seconds (default 1800 = 30min)")
 
     p_list = subparsers.add_parser("list", help="List video generation tasks")
     p_list.add_argument("--status", choices=["queued", "running", "cancelled", "succeeded", "failed", "expired"])
     p_list.add_argument("--page", type=int, default=1)
     p_list.add_argument("--page-size", type=int, default=10)
+    p_list.add_argument("--verbose", action="store_true", help="Print full JSON")
 
     p_delete = subparsers.add_parser("delete", help="Cancel or delete a task")
     p_delete.add_argument("task_id", help="Task ID to cancel/delete")
@@ -401,8 +592,22 @@ def main():
         "wait": cmd_wait,
         "list": cmd_list,
         "delete": cmd_delete,
+        "db": cmd_db,
     }
-    commands[args.command](args)
+    try:
+        commands[args.command](args)
+    except SeedanceAPIError as e:
+        print(f"API Error (HTTP {e.status_code}): {e.message}", file=sys.stderr)
+        sys.exit(1)
+    except SeedanceNetworkError as e:
+        print(f"Network Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except UnicodeEncodeError as e:
+        # API key 含非 ASCII 字符（如 …）会触发
+        print(f"Encoding Error: {e}", file=sys.stderr)
+        print("⚠️  ARK_API_KEY 含非 ASCII 字符（如 …），HTTP header 不支持", file=sys.stderr)
+        print("   请检查 shell 是否被展开为含 … 字符的脱敏 key", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

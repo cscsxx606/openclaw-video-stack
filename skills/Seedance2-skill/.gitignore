@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 测试输出（带 24h 有效签名 URL）
+results.json
+/test_output/
+/tmp_seedance_*/
+*.mp4
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 环境
+.env
+.env.local
+*.log

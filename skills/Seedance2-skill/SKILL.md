@@ -156,3 +156,155 @@ python3 scripts/seedance.py delete <ID>
 ## 参考材料
 
 镜头/风格词库、时间戳分镜、场景策略、官方示例 → [reference.md](reference.md)
+
+---
+
+## 🚀 批量并发（v2.1 新增）
+
+> 多个独立视频任务并发提交，整体耗时按并发度摊薄。
+
+### 单条提交（默认已登记到 SQLite 任务册）
+
+```bash
+# 加 --project 标记项目名（便于后续统计）
+python3 scripts/seedance.py create \
+  --prompt "小米SU7纽北鸟瞰 9:16 15s" \
+  --ratio 9:16 --duration 15 --wait --download ./out \
+  --project su7
+```
+
+任务自动写入 `~/.openclaw/workspace/data/seedance_tasks.db`（崩溃可恢复）。
+
+### 批量并发（推荐多镜头场景）
+
+```bash
+# 1) 干跑：先看成本
+python3 scripts/batch.py \
+  --prompt "镜头1: 鸟瞰" --prompt "镜头2: 漂移" \
+  --prompt "镜头3: 冲刺" --prompt "镜头4: 撞线" \
+  --duration 5 --resolution 720p --max-workers 2 --dry-run
+
+# 2) 真跑：4 段独立 5s，并发 2
+python3 scripts/batch.py \
+  --prompt "镜头1: 鸟瞰" --prompt "镜头2: 漂移" \
+  --prompt "镜头3: 冲刺" --prompt "镜头4: 撞线" \
+  --duration 5 --resolution 720p --max-workers 2 \
+  --download ./out --project su7-track
+
+# 3) 配置文件（最灵活）
+python3 scripts/batch.py --config tasks.json --max-workers 3
+```
+
+`tasks.json` 示例：
+
+```json
+[
+  {"prompt": "...", "ratio": "9:16", "duration": 5, "resolution": "720p"},
+  {"prompt": "...", "ratio": "9:16", "duration": 5, "image": "first.jpg"},
+  {"prompt": "...", "ratio": "9:16", "duration": 15, "video": "ref.mp4"},
+  {"prompt": "...", "ratio": "9:16", "duration": 10, "service_tier": "flex"}
+]
+```
+
+**性能对比**（实测 SU7 30s 项目）：
+- 串行：5min + 13min = 18 min（有依赖）
+- 独立 4 段 × 5s：max-workers=2 → 2 轮 ≈ 10-12 min（无依赖）
+
+### 💰 降本开关
+
+| 选项 | 折扣 | 代价 | 限制 | 实测成本 |
+|------|------|------|------|---------|
+| `--service-tier flex` | **5 折** | 可能排队 2-3x | **不可与 draft 同时用**；**Seedance 2.0 不支持** | 15s 1080p ≈ ¥16.81 |
+| `--draft true` (1.5 Pro) | **4 折** | 草稿画质 | **强制 resolution 480p** | 4s 480p ≈ ¥1.12 |
+| `--resolution 720p/480p` | **0.5x/0.25x tokens** | 画质降 | 480p 与 480p 草稿同 | - |
+| `--duration 5` vs 15 | **1/3** | 单镜头短 | - | - |
+
+**重点（2026-06-12 真 API 验证）**：
+- `draft + flex` 同时用会报 400（只支持 service_tier=default）
+- `draft` 模式 **强制 480p**，设置 720p/1080p 会报 400
+- **Seedance 2.0 不支持 `service_tier` 字段**（会报 `must be empty`）——只能用 draft + 720p 降本，或省点
+- **api_request 改 raise 异常**（P0 修复）：batch 重试逻辑才会真正生效
+
+**组合拳**（最便宜的"先看效果"流程）：
+```bash
+# 4 段 4s 480p 草稿（不能加 flex）
+python3 scripts/batch.py \
+  --prompt "镜头1" --prompt "镜头2" --prompt "镜头3" --prompt "镜头4" \
+  --model doubao-seedance-1-5-pro-251215 \
+  --draft --duration 4 --resolution 480p \
+  --max-workers 2 --project preview
+# 实测 2 条 并发 20.8s = ¥2.24  （2 条×¥1.12）
+# vs 正片 同条件 ¥17.94  （省 87%）
+```
+
+### 📊 任务登记册查询
+
+```bash
+# 全部任务统计
+python3 scripts/seedance.py db stats
+
+# 按项目过滤
+python3 scripts/seedance.py db stats --project su7
+
+# 查未完成（崩溃恢复用）
+python3 scripts/seedance.py db pending --project su7
+
+# 看某个批次
+python3 scripts/seedance.py db batch batch-1718180000
+
+# 单条详情（本地 + 不打 API）
+python3 scripts/seedance.py db show cgt-20260611151658-ghbs4
+```
+
+### 崩溃恢复
+
+```bash
+# 进程崩了？查到 pending 任务的 task_id 后：
+python3 scripts/seedance.py wait <task_id> --download ./out
+```
+
+---
+
+## 🎯 选型决策树（2026-06-12 实测）
+
+```
+需生成 N 段视频（10s 短视频 / 镜头拼接）
+│
+├── 1. 预算紧张 / 预演验证
+│   └── 1.5 Pro + draft + 480p
+│       - 4s×N 段，¥1.12×N，~13s/段
+│       - 示例：5 段 = ¥5.6，~1 min
+│
+└── 2. 正式出片
+    ├── 2-3 段
+    │   └── Seedance 2.0 默认（1080p 4s）
+    │       - ¥9.04/段，~7 min/段
+    │       - 2 段并发 成本 = ¥18，总 7 min
+    │
+    └── 4+ 段
+        ├── Seedance 2.0 + 4 并发
+        │   - 总 ~7 min，成本 = 4×¥9 = ¥36
+        │   - 省 30x vs 串行
+        │
+        └── Seedance 2.0 + 720p （未验证  ¥约 4.5）
+            - 需先单条跑验证 tokens 减半
+```
+
+### 踩过的坑（必看）
+
+1. **`ARK_API_KEY` 永远别用 `…` 省略号**——会触发 `UnicodeEncodeError: latin-1`。MEMORY 已记过多次。
+2. **Seedance 2.0 不要传 `service_tier`** —报错 `must be empty`
+3. **不要 `draft + flex` 同用** —报错 `draft task only support service_tier default`
+4. **draft 强制 480p** —传 720p/1080p 报错
+5. **cmd_create 走 DB 失败时调 `--no-db` 跳过**（如果你的 case 报 "任务登记失败" 可能是 bug，看 stderr）
+
+### 调试命令表
+
+| 需求 | 命令 |
+|------|------|
+| 看估算准不准 | `python3 scripts/db.py verify` |
+| 查总成本 | `python3 scripts/seedance.py db stats --project X` |
+| 查未完成 | `python3 scripts/seedance.py db pending` |
+| 查批次 | `python3 scripts/seedance.py db batch <batch-id>` |
+| 干跑看成本 | `python3 scripts/batch.py --prompt "..." --duration 4 --draft --dry-run` |
+| 重跑某条 | `python3 scripts/seedance.py wait <task_id> --download ./out` |
