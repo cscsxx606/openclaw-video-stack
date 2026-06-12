@@ -158,3 +158,85 @@ Full parameters: `scripts/seedance.py --help`
 ## Reference Materials
 
 Cinematography/style vocabulary, timestamped storyboards, scene strategies, official examples → [reference.md](reference.md)
+
+---
+
+## ⚡ v2.1 Production Tools (Concurrent + Cost Control)
+
+For multi-shot video pipelines, the v2.1 release adds two production-grade tools.
+
+### 🎯 Decision Tree
+
+```
+N-shot video pipeline
+├── Tight budget → 1.5 Pro + draft + 480p (¥1.12/shot, 13s/shot)
+│   └── 4-8 shots: --max-workers 4, ~30s total
+└── Final render → Seedance 2.0
+    ├── 2-3 shots → 2.0 + max-workers 2-3 (¥9.04/shot, 7min/shot)
+    └── 4+ shots  → 2.0 + max-workers 4 (still ~7min, 30x faster vs serial)
+        └── Save more → 2.0 + 720p (est ¥4.5/shot, run 1 to verify)
+```
+
+### 📦 Task Registry (db.py)
+
+All `seedance.py create` calls write to a local SQLite (`~/.openclaw/workspace/data/seedance_tasks.db`) by default. The registry is crash-recoverable, thread-safe, and tracks both estimated and actual costs.
+
+```bash
+# Cost summary across all tasks
+python3 scripts/seedance.py db stats
+# Output: succeeded count=13 est=¥239.22 actual=¥239.28
+
+# Verify estimation accuracy (5/5 reference points within 1%)
+python3 scripts/db.py verify
+
+# Find pending tasks after a crash
+python3 scripts/seedance.py db pending --project my-video
+
+# Inspect a batch
+python3 scripts/seedance.py db batch batch-1781229824
+```
+
+### ⚡ Concurrent Batch (batch.py)
+
+For multi-shot pipelines, use `batch.py` instead of looping `seedance.py create`:
+
+```bash
+# 4x 480p draft concurrent preview = ¥4.48, ~30s
+python3 scripts/batch.py \
+  --prompt "Shot 1: aerial city view" \
+  --prompt "Shot 2: character close-up" \
+  --prompt "Shot 3: street follow" \
+  --prompt "Shot 4: sunset panorama" \
+  --duration 4 --resolution 480p --draft --max-workers 4 \
+  --project my-video --download ./out
+
+# Dry-run to see cost first (no API submission)
+python3 scripts/batch.py --prompt "s1" --duration 5 --resolution 720p --dry-run
+```
+
+| Flag | Description |
+|------|-------------|
+| `--prompt` | Multiple prompts (repeat N times) |
+| `--config` | JSON config file path (cleaner for many tasks) |
+| `--max-workers` | Concurrency (2-4 sweet spot, 1.6-2x speedup) |
+| `--service-tier` | `default` or `flex` |
+| `--draft` | Draft mode |
+| `--resolution` / `--ratio` / `--duration` | As in `seedance.py create` |
+| `--dry-run` | Show cost estimate only, no submission |
+| `--project` | Task grouping |
+| `--download` | Video download directory |
+
+### 💰 Cost-Control Switches
+
+| Switch | Saving | Limitations | Measured Cost |
+|--------|--------|-------------|---------------|
+| `--draft` (1.5 Pro) | 50% off | Forces 480p; cannot combine with flex | 4s 480p = **¥1.12/shot** |
+| `--service-tier flex` | 50% off | **Not supported by Seedance 2.0** | 5s 1080p = ¥2.37/shot |
+| `--resolution 720p` | 50% tokens | Theoretical (not measured) | Est. ¥4.5/shot |
+
+### 🪨 Known Pitfalls (Must Read)
+
+1. **Never use `…` (U+2026) in `ARK_API_KEY`** — HTTP headers require latin-1, triggers `UnicodeEncodeError`
+2. **Don't pass `service_tier` for Seedance 2.0** — Errors with `must be empty`
+3. **Don't combine `draft + flex`** — Errors with `draft task only support service_tier default`
+4. **Draft forces 480p** — Passing 720p/1080p errors out
